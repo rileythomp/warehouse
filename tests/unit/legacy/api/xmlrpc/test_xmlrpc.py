@@ -29,6 +29,28 @@ from .....common.db.packaging import (
 )
 
 
+class TestRateLimiting:
+    def test_ratelimiting(self, pyramid_request):
+        def view(context, request):
+            return None
+
+        ratelimited_view = xmlrpc.ratelimit()(view)
+        context = pretend.stub()
+        request = pretend.stub(
+            remote_addr="127.0.0.1",
+            find_service=lambda *a, **kw: pretend.stub(
+                test=lambda *a: False, resets_in=lambda *a: None
+            ),
+        )
+        with pytest.raises(xmlrpc.XMLRPCWrappedError) as exc:
+            ratelimited_view(context, request)
+
+        assert exc.value.faultString == (
+            "HTTPTooManyRequests: The action could not be performed because there "
+            "were too many requests by the client. Limit resets in None"
+        )
+
+
 class TestSearch:
     def test_fails_with_invalid_operator(self, pyramid_request, metrics):
         with pytest.raises(xmlrpc.XMLRPCWrappedError) as exc:
