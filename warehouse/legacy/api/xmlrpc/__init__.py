@@ -11,3 +11,10 @@
 # limitations under the License.
 
 import warehouse.legacy.api.xmlrpc.views  # noqa
+from warehouse.rate_limiting import RateLimit, IRateLimiter
+
+
+def includeme(config):
+    config.register_service_factory(
+        RateLimit("10 per second"), IRateLimiter, name="xmlrpc.client"
+    )

@@ -20,6 +20,7 @@ import elasticsearch
 
 from elasticsearch_dsl import Q
 from packaging.utils import canonicalize_name
+from pyramid.httpexceptions import HTTPTooManyRequests
 from pyramid.view import view_config
 from pyramid_rpc.xmlrpc import (
     XmlRpcError,
@@ -41,6 +42,7 @@ from warehouse.packaging.models import (
     release_classifiers,
 )
 from warehouse.search.queries import SEARCH_BOOSTS
+from warehouse.rate_limiting import IRateLimiter
 
 
 def submit_xmlrpc_metrics(method=None):
@@ -62,6 +64,28 @@ def submit_xmlrpc_metrics(method=None):
     return decorator
 
 
+def ratelimit():
+    def decorator(f):
+        def wrapped(context, request):
+            ratelimiter = request.find_service(
+                IRateLimiter, name="xmlrpc.client", context=None
+            )
+            if not ratelimiter.test(request.remote_addr):
+                raise XMLRPCWrappedError(
+                    HTTPTooManyRequests(
+                        "The action could not be performed because there were too "
+                        "many requests by the client. Limit resets in "
+                        f"{ratelimiter.resets_in(request.remote_addr)}"
+                    )
+                )
+            ratelimiter.hit(request.remote_addr)
+            return f(context, request)
+
+        return wrapped
+
+    return decorator
+
+
 def xmlrpc_method(**kwargs):
     """
     Support multiple endpoints serving the same views by chaining calls to
@@ -71,7 +95,7 @@ def xmlrpc_method(**kwargs):
     kwargs.update(
         require_csrf=False,
         require_methods=["POST"],
-        decorator=(submit_xmlrpc_metrics(method=kwargs["method"]),),
+        decorator=(submit_xmlrpc_metrics(method=kwargs["method"]), ratelimit()),
     )
 
     def decorator(f):
